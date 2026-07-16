@@ -5,10 +5,10 @@ services:
     image: postgis/postgis:16-3.4
     environment:
       POSTGRES_USER: slam
-      POSTGRES_PASSWORD: slam
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-slam}
       POSTGRES_DB: slamcloude
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"   # not exposed publicly
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +20,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"   # not exposed publicly
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -31,11 +31,11 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # web console
+      - "9000:9000"             # S3 API — public: presigned URLs + COPC range reads
+      - "127.0.0.1:9001:9001"   # web console — not exposed publicly
     volumes:
       - minio_data:/data
     healthcheck:
@@ -51,7 +51,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin} &&
       mc mb --ignore-existing local/raw-scans &&
       mc mb --ignore-existing local/processed-assets
       "
@@ -62,7 +62,7 @@ services:
       dockerfile: backend/Dockerfile
     command: alembic upgrade head
     environment:
-      DATABASE_URL: postgresql+psycopg://slam:slam@db:5432/slamcloude
+      DATABASE_URL: postgresql+psycopg://slam:${POSTGRES_PASSWORD:-slam}@db:5432/slamcloude
     depends_on:
       db:
         condition: service_healthy
@@ -73,15 +73,15 @@ services:
       dockerfile: backend/Dockerfile
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
-      DATABASE_URL: postgresql+psycopg://slam:slam@db:5432/slamcloude
+      DATABASE_URL: postgresql+psycopg://slam:${POSTGRES_PASSWORD:-slam}@db:5432/slamcloude
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://minio:9000
       # PUBLIC_HOST (infra/.env): address of this machine as seen from the
       # user's browser — presigned URLs and CORS are built from it.
       S3_PUBLIC_ENDPOINT_URL: http://${PUBLIC_HOST:-localhost}:9000
       CORS_ORIGINS: '["http://${PUBLIC_HOST:-localhost}:3000", "http://localhost:5173", "http://localhost:3000"]'
-      S3_ACCESS_KEY: minioadmin
-      S3_SECRET_KEY: minioadmin
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
     ports:
       - "8000:8000"
     volumes:
@@ -99,11 +99,11 @@ services:
       context: ..
       dockerfile: worker/Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://slam:slam@db:5432/slamcloude
+      DATABASE_URL: postgresql+psycopg://slam:${POSTGRES_PASSWORD:-slam}@db:5432/slamcloude
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://minio:9000
-      S3_ACCESS_KEY: minioadmin
-      S3_SECRET_KEY: minioadmin
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
     volumes:
       - ../worker/pipeline:/srv/worker/pipeline
       - ../backend/app:/usr/local/lib/python3.12/site-packages/app
