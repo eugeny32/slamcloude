@@ -1,0 +1,130 @@
+name: slamcloude
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: slam
+      POSTGRES_PASSWORD: slam
+      POSTGRES_DB: slamcloude
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slam -d slamcloude"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/raw-scans &&
+      mc mb --ignore-existing local/processed-assets
+      "
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+psycopg://slam:slam@db:5432/slamcloude
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql+psycopg://slam:slam@db:5432/slamcloude
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000  # presigned URLs for the host browser
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend/app:/srv/backend/app   # hot reload in dev
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://slam:slam@db:5432/slamcloude
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+    volumes:
+      - ../worker/pipeline:/srv/worker/pipeline
+      - ../backend/app:/usr/local/lib/python3.12/site-packages/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    # Horizontal scaling: docker compose up --scale worker=4
+    # GPU (later): add `deploy.resources.reservations.devices` / k8s GPU pod.
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000  # API origin as seen from the browser
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+  minio_data:

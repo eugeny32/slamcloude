@@ -1,0 +1,23 @@
+[project]
+name = "slamcloude-worker"
+version = "0.1.0"
+description = "SHARE S20 point cloud processing platform — Celery pipeline worker"
+requires-python = ">=3.12"
+dependencies = [
+    "celery[redis]>=5.4",
+    "slamcloude-backend",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "laspy[lazrs]>=2.5",
+    "pyproj>=3.6",
+]
+
+[tool.uv.sources]
+slamcloude-backend = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pipeline"]

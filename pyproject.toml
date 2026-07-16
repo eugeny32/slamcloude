@@ -1,0 +1,41 @@
+[tool.uv.workspace]
+members = ["backend", "worker"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests", "worker/tests"]
+addopts = "-q -p no:cacheprovider"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["backend", "worker"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+# The backend/alembic *directory* shadows the installed alembic package.
+known-third-party = ["alembic"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+explicit_package_bases = true
+mypy_path = ["backend", "worker"]
+
+[[tool.mypy.overrides]]
+module = ["celery.*", "geoalchemy2.*", "boto3.*", "botocore.*", "laspy.*", "scipy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Celery's @task decorator is untyped; don't flag every task definition.
+module = ["pipeline.*"]
+disallow_untyped_decorators = false

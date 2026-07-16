@@ -1,0 +1,20 @@
+# Build context: repository root (see infra/docker-compose.yml)
+# NOTE: GPU-intensive steps (Open3D/CUDA) will move this to a CUDA base image
+# scheduled on GPU nodes (see infra/k8s/).
+FROM python:3.12-slim
+
+# PDAL: COPC octree generation (writers.copc) in the build_octree step.
+# RTKLIB: rnx2rtkp PPK solver (rover obs + base RINEX) in the ppk_correction step.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pdal rtklib \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /srv
+COPY backend/ ./backend/
+COPY worker/ ./worker/
+RUN uv pip install --system --no-cache ./backend ./worker
+
+WORKDIR /srv/worker
+CMD ["celery", "-A", "pipeline.celery_app:celery_app", "worker", "--loglevel=info"]

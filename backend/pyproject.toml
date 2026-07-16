@@ -1,0 +1,25 @@
+[project]
+name = "slamcloude-backend"
+version = "0.1.0"
+description = "SHARE S20 point cloud processing platform — API service"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy>=2.0",
+    "geoalchemy2>=0.15",
+    "psycopg[binary]>=3.1",
+    "alembic>=1.13",
+    "boto3>=1.34",
+    "celery[redis]>=5.4",
+    "shapely>=2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
