@@ -171,7 +171,7 @@ export const deleteScan = (scanId: string): Promise<void> =>
 
 export const updateScanSettings = (
   scanId: string,
-  settings: { photogrammetry_enabled: boolean },
+  settings: { bag_lidar_enabled: boolean },
 ): Promise<Scan> =>
   request(`/scans/${scanId}/settings`, {
     method: "PATCH",

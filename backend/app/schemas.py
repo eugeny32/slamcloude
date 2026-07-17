@@ -116,6 +116,6 @@ class ScanOut(BaseModel):
     status: ScanStatus
     captured_at: datetime | None
     rtk_fixed: bool
-    photogrammetry_enabled: bool
+    bag_lidar_enabled: bool
     size_bytes: int | None
     created_at: datetime

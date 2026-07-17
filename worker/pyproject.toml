@@ -10,6 +10,7 @@ dependencies = [
     "scipy>=1.13",
     "laspy[lazrs]>=2.5",
     "pyproj>=3.6",
+    "Pillow>=10",
 ]
 
 [tool.uv.sources]

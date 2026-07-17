@@ -40,9 +40,8 @@ class PipelineStep(enum.StrEnum):
     FILTER_OUTLIERS = "filter_outliers"
     BIN_TO_RINEX = "bin_to_rinex"
     PPK_CORRECTION = "ppk_correction"
-    GEOREFERENCE = "georeference"
     COLORIZE = "colorize"
-    DENSE_STEREO = "dense_stereo"
+    GEOREFERENCE = "georeference"
     BUILD_OCTREE = "build_octree"
 
 
@@ -66,9 +65,8 @@ PIPELINE_ORDER: tuple[PipelineStep, ...] = (
     PipelineStep.FILTER_OUTLIERS,
     PipelineStep.BIN_TO_RINEX,
     PipelineStep.PPK_CORRECTION,
-    PipelineStep.GEOREFERENCE,
     PipelineStep.COLORIZE,
-    PipelineStep.DENSE_STEREO,
+    PipelineStep.GEOREFERENCE,
     PipelineStep.BUILD_OCTREE,
 )
 
@@ -85,12 +83,10 @@ class ScanInputKind(enum.StrEnum):
     FRAME_POSE = "frame_pose"
     PROJECT_INFO = "project_info"
     CALIBRATION = "calibration"
-    STEREO_IMAGES = "stereo_images"
+    CAMERA_FRAMES = "camera_frames"
 
 
 def _enum(e: type[enum.Enum], name: str) -> Enum:
-    # Store enum *values* as plain VARCHAR (validated at the app level):
-    # adding a member is free, no ALTER TYPE as with native PG enums.
     return Enum(e, name=name, native_enum=False, values_callable=lambda x: [i.value for i in x])
 
 
@@ -144,18 +140,14 @@ class Scan(Base):
         _enum(ScanStatus, "scan_status"), nullable=False, default=ScanStatus.UPLOADING, index=True
     )
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Declared by the client at upload init; verified after multipart complete
-    # (size) and during pipeline decode (checksum, streaming).
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     checksum_sha256: Mapped[str | None] = mapped_column(String(64))
-    # Filled by the pipeline: decode_raw (points/format/CRS), georeference (bbox).
     num_points: Mapped[int | None] = mapped_column(BigInteger)
     source_format: Mapped[str | None] = mapped_column(String(16))
     crs_epsg: Mapped[int | None] = mapped_column(Integer)
-    # WGS84 footprint of the scan; GiST index (below) serves "scans in this area" queries.
     bbox = mapped_column(Geometry(geometry_type="POLYGON", srid=4326, spatial_index=False))
     rtk_fixed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    photogrammetry_enabled: Mapped[bool] = mapped_column(
+    bag_lidar_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -190,7 +182,6 @@ class ScanInput(Base):
 
     scan: Mapped[Scan] = relationship(back_populates="inputs")
 
-    # One file per kind per scan; re-upload replaces it.
     __table_args__ = (Index("uq_scan_inputs_scan_kind", "scan_id", "kind", unique=True),)
 
 

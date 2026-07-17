@@ -6,13 +6,13 @@ are skipped).
 
 Data flow between steps goes through S3 (steps may run on different worker
 pods): raw bucket holds `{scan_id}/intermediate/<step>.laz`, the processed
-bucket receives final assets. Files are streamed to/from local temp storage
-and processed in chunks — a 50 GB cloud never sits in memory.
+bucket receives final assets.
 """
 
 import shutil
 import tempfile
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,21 +36,18 @@ from app.models import (
     ScanStatus,
 )
 from app.services.s3 import get_storage, parse_storage_path
-from pipeline import gnss, processing
+from pipeline import gnss, processing, s20
 from pipeline.celery_app import celery_app
 from pipeline.db import SessionLocal
 
 
 @dataclass
 class StepOutcome:
-    """What a step reports back to be persisted on the scan."""
-
     num_points: int | None = None
     source_format: str | None = None
     crs_epsg: int | None = None
     bbox_ewkt: str | None = None
     rtk_fixed: bool | None = None
-    # (asset_type, storage_path, file_size)
     assets: list[tuple[AssetType, str, int]] = field(default_factory=list)
 
 
@@ -63,7 +60,6 @@ def corrected_trajectory_key(scan_id: str) -> str:
 
 
 def build_pipeline(scan_id: str) -> Any:
-    """Chain of all steps in canonical order; completed steps skip themselves."""
     return chain(*(run_step.si(scan_id, step.value) for step in PIPELINE_ORDER))
 
 
@@ -122,7 +118,6 @@ def run_step(scan_id: str, step_value: str) -> str:
         if outcome.rtk_fixed is not None:
             scan.rtk_fixed = outcome.rtk_fixed
         for asset_type, path, size in outcome.assets:
-            # Reprocessing produces a new version; download/preview serve the latest.
             latest = session.execute(
                 select(func.max(ProcessedAsset.version)).where(
                     ProcessedAsset.scan_id == sid,
@@ -152,7 +147,6 @@ def _get_job(session: Session, scan_id: uuid.UUID, step: PipelineStep) -> Job:
 
 
 def _load_inputs(scan_id: str) -> dict[ScanInputKind, str]:
-    """kind -> storage_path for the scan's auxiliary input files."""
     with SessionLocal() as session:
         rows = session.execute(
             select(ScanInput).where(ScanInput.scan_id == uuid.UUID(scan_id))
@@ -169,6 +163,36 @@ def _download_input(
     return local
 
 
+def _save_inputs(
+    storage: Any,
+    raw_bucket: str,
+    scan_id: str,
+    extra: list[tuple[ScanInputKind, str, int]],
+) -> None:
+    with SessionLocal() as session:
+        for kind, path, size in extra:
+            existing = session.execute(
+                select(ScanInput).where(
+                    ScanInput.scan_id == uuid.UUID(scan_id),
+                    ScanInput.kind == kind,
+                )
+            ).scalar_one_or_none()
+            if existing:
+                existing.storage_path = path
+                existing.file_size = size
+            else:
+                session.add(
+                    ScanInput(
+                        id=uuid.uuid4(),
+                        scan_id=uuid.UUID(scan_id),
+                        kind=kind,
+                        storage_path=path,
+                        file_size=size,
+                    )
+                )
+        session.commit()
+
+
 def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
     settings = get_settings()
     storage = get_storage()
@@ -178,24 +202,80 @@ def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
         scan = session.get_one(Scan, uuid.UUID(scan_id))
         raw_path = scan.raw_file_path or ""
         checksum = scan.checksum_sha256
+        use_bag = bool(getattr(scan, "bag_lidar_enabled", False))
 
     workdir = Path(tempfile.mkdtemp(prefix=f"slam-{step.value}-"))
     try:
+        # -------------------------------------------------------------------
         if step is PipelineStep.DECODE_RAW:
             src_bucket, src_key = parse_storage_path(raw_path)
             local_raw = workdir / Path(src_key).name
             storage.download_file(src_bucket, src_key, local_raw)
             if checksum:
                 processing.verify_checksum(local_raw, checksum)
-            local_out = workdir / "decoded.laz"
-            decoded = processing.decode_to_laz(local_raw, local_out, source_name=src_key)
-            storage.upload_file(raw_bucket, intermediate_key(scan_id, step), local_out)
-            return StepOutcome(
-                num_points=decoded.num_points,
-                source_format=decoded.source_format,
-                crs_epsg=decoded.crs_epsg,
-            )
 
+            local_out = workdir / "decoded.laz"
+            extra_inputs: list[tuple[ScanInputKind, str, int]] = []
+
+            if not use_bag:
+                # ---- PCD path: standard decode from PCD folders in ZIP ----
+                decoded = processing.decode_to_laz(local_raw, local_out, source_name=src_key)
+                storage.upload_file(raw_bucket, intermediate_key(scan_id, step), local_out)
+                return StepOutcome(
+                    num_points=decoded.num_points,
+                    source_format=decoded.source_format,
+                    crs_epsg=decoded.crs_epsg,
+                )
+
+            # ---- BAG path: extract LiDAR + camera frames from bag ZIP ----
+            n_pts = s20.bag_lidar_to_laz(local_raw, local_out)
+            storage.upload_file(raw_bucket, intermediate_key(scan_id, step), local_out)
+
+            # Extract camera frames (best-effort)
+            try:
+                cam_dir = workdir / "camera_frames"
+                cam_dir.mkdir(exist_ok=True)
+                n_cam = s20.extract_camera_frames_from_bag(local_raw, cam_dir)
+                if n_cam > 0:
+                    cam_zip = workdir / "camera_frames.zip"
+                    with zipfile.ZipFile(cam_zip, "w", zipfile.ZIP_STORED) as zf:
+                        for img in sorted(cam_dir.iterdir()):
+                            zf.write(img, img.name)
+                    cam_key = f"{scan_id}/inputs/camera_frames.zip"
+                    storage.upload_file(raw_bucket, cam_key, cam_zip)
+                    extra_inputs.append((
+                        ScanInputKind.CAMERA_FRAMES,
+                        f"s3://{raw_bucket}/{cam_key}",
+                        cam_zip.stat().st_size,
+                    ))
+            except Exception:
+                pass  # camera extraction is best-effort
+
+            # Extract calibration.yaml from bag ZIP (best-effort)
+            try:
+                with zipfile.ZipFile(local_raw) as zf:
+                    for name in zf.namelist():
+                        if Path(name).name == "calibration.yaml":
+                            cal_local = workdir / "calibration.yaml"
+                            with zf.open(name) as src, open(cal_local, "wb") as dst:
+                                dst.write(src.read())
+                            cal_key = f"{scan_id}/inputs/calibration.yaml"
+                            storage.upload_file(raw_bucket, cal_key, cal_local)
+                            extra_inputs.append((
+                                ScanInputKind.CALIBRATION,
+                                f"s3://{raw_bucket}/{cal_key}",
+                                cal_local.stat().st_size,
+                            ))
+                            break
+            except Exception:
+                pass
+
+            if extra_inputs:
+                _save_inputs(storage, raw_bucket, scan_id, extra_inputs)
+
+            return StepOutcome(num_points=n_pts, source_format="bag")
+
+        # -------------------------------------------------------------------
         if step is PipelineStep.FILTER_OUTLIERS:
             local_in = workdir / "in.laz"
             local_out = workdir / "filtered.laz"
@@ -206,10 +286,17 @@ def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
             storage.upload_file(raw_bucket, intermediate_key(scan_id, step), local_out)
             return StepOutcome(num_points=result.points_out)
 
+        # -------------------------------------------------------------------
+        if step is PipelineStep.BIN_TO_RINEX:
+            # Placeholder: convert proprietary GNSS binary to RINEX when present.
+            # Without a binary file this step is a no-op.
+            inputs = _load_inputs(scan_id)
+            if ScanInputKind.ROVER_PPKRAW_BIN not in inputs and ScanInputKind.BASE_BIN not in inputs:
+                return StepOutcome()
+            return StepOutcome()
+
+        # -------------------------------------------------------------------
         if step is PipelineStep.PPK_CORRECTION:
-            # PPK: solve the rover's raw GNSS observations against a base
-            # station RINEX. Without a base file the step is a no-op — the
-            # user uploads one later and hits POST /scans/{id}/reprocess.
             inputs = _load_inputs(scan_id)
             if ScanInputKind.BASE_RINEX not in inputs:
                 return StepOutcome()
@@ -221,8 +308,7 @@ def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
                     )
             if not gnss.rnx2rtkp_available():
                 raise processing.ProcessingError(
-                    "rnx2rtkp (RTKLIB) is not installed on this worker; "
-                    "PPK runs in the worker Docker image"
+                    "rnx2rtkp (RTKLIB) is not installed on this worker"
                 )
             rover = _download_input(storage, inputs, ScanInputKind.ROVER_OBS, workdir)
             base = _download_input(storage, inputs, ScanInputKind.BASE_RINEX, workdir)
@@ -237,11 +323,40 @@ def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
             storage.upload_file(raw_bucket, corrected_trajectory_key(scan_id), corrected_pos)
             return StepOutcome(rtk_fixed=gnss.fixed_ratio(corrected) >= 0.5)
 
+        # -------------------------------------------------------------------
+        if step is PipelineStep.COLORIZE:
+            inputs = _load_inputs(scan_id)
+            local_in = workdir / "filtered.laz"
+            storage.download_file(
+                raw_bucket, intermediate_key(scan_id, PipelineStep.FILTER_OUTLIERS), local_in
+            )
+            if ScanInputKind.CAMERA_FRAMES not in inputs:
+                # PCD path: point cloud already carries RGB from SLAM output; pass-through.
+                storage.copy_object(
+                    raw_bucket,
+                    intermediate_key(scan_id, PipelineStep.FILTER_OUTLIERS),
+                    raw_bucket,
+                    intermediate_key(scan_id, step),
+                )
+                return StepOutcome()
+            # BAG path: project nav-cam frames onto LiDAR points in SLAM body frame.
+            local_out = workdir / "coloured.laz"
+            fp_path = _download_input(storage, inputs, ScanInputKind.FRAME_POSE, workdir)
+            frame_pose = s20.read_frame_pose(fp_path)
+            cam_zip = _download_input(storage, inputs, ScanInputKind.CAMERA_FRAMES, workdir)
+            cal_path = None
+            if ScanInputKind.CALIBRATION in inputs:
+                cal_path = _download_input(storage, inputs, ScanInputKind.CALIBRATION, workdir)
+            s20.colorize_laz(local_in, cam_zip, frame_pose, local_out, cal_path)
+            storage.upload_file(raw_bucket, intermediate_key(scan_id, step), local_out)
+            return StepOutcome()
+
+        # -------------------------------------------------------------------
         if step is PipelineStep.GEOREFERENCE:
             local_in = workdir / "in.laz"
             storage.download_file(
                 raw_bucket,
-                intermediate_key(scan_id, PipelineStep.FILTER_OUTLIERS),
+                intermediate_key(scan_id, PipelineStep.COLORIZE),
                 local_in,
             )
 
@@ -251,8 +366,6 @@ def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
                 ScanInputKind.TRAJECTORY in inputs
                 and storage.object_exists(raw_bucket, corrected_key)
             ):
-                # Shift the cloud by (corrected - original) trajectory delta,
-                # interpolated at each point's gps_time.
                 original_pos = _download_input(
                     storage, inputs, ScanInputKind.TRAJECTORY, workdir
                 )
@@ -268,11 +381,9 @@ def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
                 storage.upload_file(raw_bucket, intermediate_key(scan_id, step), local_out)
                 bbox = processing.wgs84_bbox(local_out)
             else:
-                # No PPK correction: georeferencing relies on the CRS carried
-                # by the file itself. Points unchanged — server-side copy.
                 storage.copy_object(
                     raw_bucket,
-                    intermediate_key(scan_id, PipelineStep.FILTER_OUTLIERS),
+                    intermediate_key(scan_id, PipelineStep.COLORIZE),
                     raw_bucket,
                     intermediate_key(scan_id, step),
                 )
@@ -281,17 +392,7 @@ def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
                 bbox_ewkt=processing.bbox_polygon_ewkt(bbox) if bbox else None
             )
 
-        if step is PipelineStep.COLORIZE:
-            # Colorization needs the two 16 MP camera streams + calibration —
-            # pending SHARE S20 camera data spec. Pass-through for now.
-            storage.copy_object(
-                raw_bucket,
-                intermediate_key(scan_id, PipelineStep.GEOREFERENCE),
-                raw_bucket,
-                intermediate_key(scan_id, step),
-            )
-            return StepOutcome()
-
+        # -------------------------------------------------------------------
         if step is PipelineStep.BUILD_OCTREE:
             local_in = workdir / "final.laz"
             storage.download_file(
@@ -301,26 +402,22 @@ def _execute_step(scan_id: str, step: PipelineStep) -> StepOutcome:
 
             las_key = f"{scan_id}/pointcloud.laz"
             storage.upload_file(settings.s3_bucket_processed, las_key, local_in)
-            assets.append(
-                (
-                    AssetType.LAS,
-                    f"s3://{settings.s3_bucket_processed}/{las_key}",
-                    local_in.stat().st_size,
-                )
-            )
+            assets.append((
+                AssetType.LAS,
+                f"s3://{settings.s3_bucket_processed}/{las_key}",
+                local_in.stat().st_size,
+            ))
 
             if processing.pdal_available():
                 local_copc = workdir / "pointcloud.copc.laz"
                 processing.build_copc(local_in, local_copc)
                 copc_key = f"{scan_id}/pointcloud.copc.laz"
                 storage.upload_file(settings.s3_bucket_processed, copc_key, local_copc)
-                assets.append(
-                    (
-                        AssetType.COPC,
-                        f"s3://{settings.s3_bucket_processed}/{copc_key}",
-                        local_copc.stat().st_size,
-                    )
-                )
+                assets.append((
+                    AssetType.COPC,
+                    f"s3://{settings.s3_bucket_processed}/{copc_key}",
+                    local_copc.stat().st_size,
+                ))
             return StepOutcome(assets=assets)
 
         raise processing.ProcessingError(f"unknown step: {step}")

@@ -30,7 +30,7 @@ export interface Scan {
   status: ScanStatus;
   captured_at: string | null;
   rtk_fixed: boolean;
-  photogrammetry_enabled: boolean;
+  bag_lidar_enabled: boolean;
   size_bytes: number | null;
   created_at: string;
 }

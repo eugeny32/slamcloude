@@ -480,7 +480,7 @@ async def scan_preview(
 
 
 class ScanSettings(BaseModel):
-    photogrammetry_enabled: bool
+    bag_lidar_enabled: bool
 
 
 @router.patch(
@@ -495,7 +495,7 @@ async def update_scan_settings(
     session: SessionDep,
 ) -> Scan:
     scan = await get_owned_scan(session, scan_id, user)
-    scan.photogrammetry_enabled = body.photogrammetry_enabled
+    scan.bag_lidar_enabled = body.bag_lidar_enabled
     await session.commit()
     await session.refresh(scan)
     return scan

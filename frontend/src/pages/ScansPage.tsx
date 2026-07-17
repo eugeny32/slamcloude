@@ -83,7 +83,6 @@ export default function ScansPage() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [ppkFor, setPpkFor] = useState<string | null>(null);
-  const [reprocessPending, setReprocessPending] = useState<Set<string>>(new Set());
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -125,28 +124,12 @@ export default function ScansPage() {
     }
   }
 
-  async function handleTogglePhotogrammetry(scanId: string, enabled: boolean) {
+  async function handleProcessFromBag(scanId: string) {
+    if (!confirm("Запустить обработку из BAG-файла? Данные будут пересчитаны из bag (LiDAR + colorize)."))
+      return;
     try {
-      await updateScanSettings(scanId, { photogrammetry_enabled: enabled });
-      setReprocessPending((prev) => {
-        const next = new Set(prev);
-        next.add(scanId);
-        return next;
-      });
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleReprocess(scanId: string) {
-    try {
-      await reprocess(scanId, "dense_stereo");
-      setReprocessPending((prev) => {
-        const next = new Set(prev);
-        next.delete(scanId);
-        return next;
-      });
+      await updateScanSettings(scanId, { bag_lidar_enabled: true });
+      await reprocess(scanId, "decode_raw");
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -209,7 +192,6 @@ export default function ScansPage() {
                 <th>Статус</th>
                 <th>Размер</th>
                 <th>RTK</th>
-                <th title="Включить Dense Stereo фотограмметрию (требует стерео-камеры в bag-файле)">Фото</th>
                 <th>Создан</th>
                 <th />
               </tr>
@@ -226,35 +208,23 @@ export default function ScansPage() {
                     </td>
                     <td>{formatBytes(s.size_bytes)}</td>
                     <td>{s.rtk_fixed ? <span className="badge rtk">fixed</span> : "—"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      <input
-                        type="checkbox"
-                        checked={s.photogrammetry_enabled}
-                        onChange={(e) =>
-                          void handleTogglePhotogrammetry(s.id, e.target.checked)
-                        }
-                        title="Включить фотограмметрию"
-                      />
-                      {reprocessPending.has(s.id) && (
-                        <button
-                          className="secondary"
-                          onClick={() => void handleReprocess(s.id)}
-                          title="Запустить пересчёт с Dense Stereo"
-                          style={{ marginLeft: 6, fontSize: "0.8em" }}
-                        >
-                          Пересчитать
-                        </button>
-                      )}
-                    </td>
                     <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button
                         className="secondary"
                         onClick={() => void handleReprocessFull(s.id)}
-                        title="Пересчитать с нуля (decode_raw → build_octree)"
+                        title="Пересчитать с нуля из PCD-папок (decode_raw → build_octree)"
                         style={{ marginRight: 4 }}
                       >
                         ↺
+                      </button>
+                      <button
+                        className="secondary"
+                        onClick={() => void handleProcessFromBag(s.id)}
+                        title={s.bag_lidar_enabled ? "BAG-режим активен. Нажмите для повторного запуска из BAG" : "Обработать из BAG-файла (LiDAR + colorize)"}
+                        style={{ marginRight: 4, color: s.bag_lidar_enabled ? "#0a0" : undefined }}
+                      >
+                        ⚡BAG
                       </button>
                       <button
                         className="secondary"
@@ -275,7 +245,7 @@ export default function ScansPage() {
                   </tr>
                   {ppkFor === s.id && (
                     <tr key={`${s.id}-ppk`}>
-                      <td colSpan={6}>
+                      <td colSpan={5}>
                         <PpkPanel scanId={s.id} onDone={() => void refresh()} />
                       </td>
                     </tr>
