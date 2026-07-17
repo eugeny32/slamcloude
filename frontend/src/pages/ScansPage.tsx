@@ -153,7 +153,7 @@ export default function ScansPage() {
           }}
         />
         <button disabled={progress !== null} onClick={() => fileInput.current?.click()}>
-          Загрузить скан (LAS/LAZ)
+          Загрузить данные
         </button>
         {progress !== null && (
           <>
