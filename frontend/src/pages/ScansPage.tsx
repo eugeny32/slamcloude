@@ -164,7 +164,7 @@ export default function ScansPage() {
         <input
           ref={fileInput}
           type="file"
-          accept=".las,.laz"
+          accept=".zip"
           style={{ display: "none" }}
           onChange={(e) => {
             const f = e.target.files?.[0];
