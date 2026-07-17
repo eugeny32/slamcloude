@@ -28,7 +28,19 @@ function ApiKeySection() {
 
   async function copy() {
     if (!rawKey) return;
-    await navigator.clipboard.writeText(rawKey);
+    try {
+      await navigator.clipboard.writeText(rawKey);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = rawKey;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
