@@ -83,6 +83,7 @@ export default function ScansPage() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [ppkFor, setPpkFor] = useState<string | null>(null);
+  const [reprocessPending, setReprocessPending] = useState<Set<string>>(new Set());
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -127,6 +128,25 @@ export default function ScansPage() {
   async function handleTogglePhotogrammetry(scanId: string, enabled: boolean) {
     try {
       await updateScanSettings(scanId, { photogrammetry_enabled: enabled });
+      setReprocessPending((prev) => {
+        const next = new Set(prev);
+        next.add(scanId);
+        return next;
+      });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleReprocess(scanId: string) {
+    try {
+      await reprocess(scanId, "dense_stereo");
+      setReprocessPending((prev) => {
+        const next = new Set(prev);
+        next.delete(scanId);
+        return next;
+      });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -195,7 +215,7 @@ export default function ScansPage() {
                     </td>
                     <td>{formatBytes(s.size_bytes)}</td>
                     <td>{s.rtk_fixed ? <span className="badge rtk">fixed</span> : "—"}</td>
-                    <td>
+                    <td style={{ whiteSpace: "nowrap" }}>
                       <input
                         type="checkbox"
                         checked={s.photogrammetry_enabled}
@@ -204,6 +224,16 @@ export default function ScansPage() {
                         }
                         title="Включить фотограмметрию"
                       />
+                      {reprocessPending.has(s.id) && (
+                        <button
+                          className="secondary"
+                          onClick={() => void handleReprocess(s.id)}
+                          title="Запустить пересчёт с Dense Stereo"
+                          style={{ marginLeft: 6, fontSize: "0.8em" }}
+                        >
+                          Пересчитать
+                        </button>
+                      )}
                     </td>
                     <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
