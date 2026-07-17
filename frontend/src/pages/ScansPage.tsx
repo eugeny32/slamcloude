@@ -153,6 +153,17 @@ export default function ScansPage() {
     }
   }
 
+  async function handleReprocessFull(scanId: string) {
+    if (!confirm("Запустить полный пересчёт с нуля? Все промежуточные данные будут пересчитаны."))
+      return;
+    try {
+      await reprocess(scanId, "decode_raw");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <div className="page">
       <h1>
@@ -237,6 +248,14 @@ export default function ScansPage() {
                     </td>
                     <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        className="secondary"
+                        onClick={() => void handleReprocessFull(s.id)}
+                        title="Пересчитать с нуля (decode_raw → build_octree)"
+                        style={{ marginRight: 4 }}
+                      >
+                        ↺
+                      </button>
                       <button
                         className="secondary"
                         onClick={() => setPpkFor(ppkFor === s.id ? null : s.id)}
