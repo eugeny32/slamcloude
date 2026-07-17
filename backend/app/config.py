@@ -30,7 +30,12 @@ class Settings(BaseSettings):
     pipeline_stub_seconds: float = 0.5
 
     # Frontend origins allowed to call the API from the browser.
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://ntrip.host:3000",
+        "http://mtccom.ru:3000",
+    ]
 
     rate_limit_enabled: bool = True
     # Fixed window per API key; generous defaults for MVP.
