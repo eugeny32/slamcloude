@@ -31,6 +31,7 @@ from app.schemas import (
     JobOut,
     ReprocessRequest,
     ScanInputOut,
+    ScanOut,
     ScanStatusOut,
     UploadCompleteRequest,
     UploadInitRequest,
