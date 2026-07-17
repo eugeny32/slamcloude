@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { listScans, reprocess, uploadInput, uploadScan } from "../api";
+import { deleteScan, listScans, reprocess, uploadInput, uploadScan } from "../api";
 import type { InputKind, Scan } from "../types";
 
 function formatBytes(n: number | null): string {
@@ -114,6 +114,16 @@ export default function ScansPage() {
     }
   }
 
+  async function handleDeleteScan(scanId: string) {
+    if (!confirm("Удалить скан? Все данные будут удалены навсегда.")) return;
+    try {
+      await deleteScan(scanId);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <div className="page">
       <h1>
@@ -176,12 +186,21 @@ export default function ScansPage() {
                     <td>{formatBytes(s.size_bytes)}</td>
                     <td>{s.rtk_fixed ? <span className="badge rtk">fixed</span> : "—"}</td>
                     <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
-                    <td>
+                    <td style={{ whiteSpace: "nowrap" }}>
                       <button
                         className="secondary"
                         onClick={() => setPpkFor(ppkFor === s.id ? null : s.id)}
+                        style={{ marginRight: 4 }}
                       >
                         PPK
+                      </button>
+                      <button
+                        className="secondary"
+                        onClick={() => void handleDeleteScan(s.id)}
+                        title="Удалить скан"
+                        style={{ padding: "2px 8px", color: "#c00" }}
+                      >
+                        ✕
                       </button>
                     </td>
                   </tr>

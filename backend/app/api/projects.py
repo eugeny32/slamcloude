@@ -2,13 +2,17 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, SessionDep, get_owned_project
+from app.config import get_settings
 from app.models import Project, Scan
 from app.ratelimit import RateLimiter
 from app.schemas import ProjectCreate, ProjectOut, ScanOut
 from app.services.geo import BBoxError, parse_bbox
+from app.services.s3 import get_storage
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -64,3 +68,53 @@ async def list_project_scans(
 
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+class ProjectRename(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+@router.put(
+    "/{project_id}",
+    response_model=ProjectOut,
+    dependencies=[Depends(_default_limit)],
+)
+async def rename_project(
+    project_id: uuid.UUID,
+    body: ProjectRename,
+    user: CurrentUser,
+    session: SessionDep,
+) -> Project:
+    project = await get_owned_project(session, project_id, user)
+    project.name = body.name
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
+@router.delete(
+    "/{project_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_default_limit)],
+)
+async def delete_project(
+    project_id: uuid.UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> None:
+    project = await get_owned_project(session, project_id, user)
+
+    scans_result = await session.execute(
+        select(Scan).where(Scan.project_id == project_id)
+    )
+    scans = list(scans_result.scalars().all())
+
+    settings = get_settings()
+    storage = get_storage()
+    for scan in scans:
+        sid = str(scan.id)
+        await run_in_threadpool(storage.delete_prefix, settings.s3_bucket_raw, f"{sid}/")
+        await run_in_threadpool(storage.delete_prefix, settings.s3_bucket_processed, f"{sid}/")
+
+    await session.delete(project)
+    await session.commit()

@@ -145,3 +145,22 @@ export async function downloadScan(scanId: string, filename: string): Promise<vo
   a.click();
   URL.revokeObjectURL(url);
 }
+
+export interface UserInfo {
+  id: string;
+  email: string;
+}
+
+export const getMe = (): Promise<UserInfo> => request("/users/me");
+
+export const rotateApiKey = (): Promise<{ api_key: string }> =>
+  request("/users/me/rotate-key", { method: "POST" });
+
+export const renameProject = (projectId: string, name: string): Promise<Project> =>
+  request(`/projects/${projectId}`, { method: "PUT", body: JSON.stringify({ name }) });
+
+export const deleteProject = (projectId: string): Promise<void> =>
+  request(`/projects/${projectId}`, { method: "DELETE" });
+
+export const deleteScan = (scanId: string): Promise<void> =>
+  request(`/scans/${scanId}`, { method: "DELETE" });

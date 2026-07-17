@@ -475,3 +475,21 @@ async def scan_preview(
         "crs_epsg": scan.crs_epsg,
         "copc_url": copc_url,
     }
+
+
+@router.delete(
+    "/{scan_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_default_limit)],
+)
+async def delete_scan(
+    scan_id: uuid.UUID, user: CurrentUser, session: SessionDep
+) -> None:
+    scan = await get_owned_scan(session, scan_id, user)
+    settings = get_settings()
+    storage = get_storage()
+    sid = str(scan_id)
+    await run_in_threadpool(storage.delete_prefix, settings.s3_bucket_raw, f"{sid}/")
+    await run_in_threadpool(storage.delete_prefix, settings.s3_bucket_processed, f"{sid}/")
+    await session.delete(scan)
+    await session.commit()

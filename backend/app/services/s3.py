@@ -119,6 +119,24 @@ class S3Storage:
         )
         return cast(str, url)
 
+    def delete_prefix(self, bucket: str, prefix: str) -> int:
+        """Delete all objects whose key starts with prefix. Returns count deleted."""
+        deleted = 0
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            objects = page.get("Contents", [])
+            if not objects:
+                continue
+            self._client.delete_objects(
+                Bucket=bucket,
+                Delete={"Objects": [{"Key": o["Key"]} for o in objects]},
+            )
+            deleted += len(objects)
+        return deleted
+
+    def delete_object(self, bucket: str, key: str) -> None:
+        self._client.delete_object(Bucket=bucket, Key=key)
+
 
 @lru_cache
 def get_storage() -> S3Storage:
