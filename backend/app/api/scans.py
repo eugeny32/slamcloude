@@ -6,6 +6,7 @@ from pathlib import Path as FsPath
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from pydantic import BaseModel
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from geoalchemy2.shape import to_shape
@@ -475,6 +476,28 @@ async def scan_preview(
         "crs_epsg": scan.crs_epsg,
         "copc_url": copc_url,
     }
+
+
+class ScanSettings(BaseModel):
+    photogrammetry_enabled: bool
+
+
+@router.patch(
+    "/{scan_id}/settings",
+    response_model=ScanOut,
+    dependencies=[Depends(_default_limit)],
+)
+async def update_scan_settings(
+    scan_id: uuid.UUID,
+    body: ScanSettings,
+    user: CurrentUser,
+    session: SessionDep,
+) -> Scan:
+    scan = await get_owned_scan(session, scan_id, user)
+    scan.photogrammetry_enabled = body.photogrammetry_enabled
+    await session.commit()
+    await session.refresh(scan)
+    return scan
 
 
 @router.delete(

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { deleteScan, listScans, reprocess, uploadInput, uploadScan } from "../api";
+import { deleteScan, listScans, reprocess, updateScanSettings, uploadInput, uploadScan } from "../api";
 import type { InputKind, Scan } from "../types";
 
 function formatBytes(n: number | null): string {
@@ -124,6 +124,15 @@ export default function ScansPage() {
     }
   }
 
+  async function handleTogglePhotogrammetry(scanId: string, enabled: boolean) {
+    try {
+      await updateScanSettings(scanId, { photogrammetry_enabled: enabled });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <div className="page">
       <h1>
@@ -169,6 +178,7 @@ export default function ScansPage() {
                 <th>Статус</th>
                 <th>Размер</th>
                 <th>RTK</th>
+                <th title="Включить Dense Stereo фотограмметрию (требует стерео-камеры в bag-файле)">Фото</th>
                 <th>Создан</th>
                 <th />
               </tr>
@@ -185,6 +195,16 @@ export default function ScansPage() {
                     </td>
                     <td>{formatBytes(s.size_bytes)}</td>
                     <td>{s.rtk_fixed ? <span className="badge rtk">fixed</span> : "—"}</td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={s.photogrammetry_enabled}
+                        onChange={(e) =>
+                          void handleTogglePhotogrammetry(s.id, e.target.checked)
+                        }
+                        title="Включить фотограмметрию"
+                      />
+                    </td>
                     <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button

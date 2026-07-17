@@ -38,9 +38,11 @@ class ScanStatus(enum.StrEnum):
 class PipelineStep(enum.StrEnum):
     DECODE_RAW = "decode_raw"
     FILTER_OUTLIERS = "filter_outliers"
+    BIN_TO_RINEX = "bin_to_rinex"
     PPK_CORRECTION = "ppk_correction"
     GEOREFERENCE = "georeference"
     COLORIZE = "colorize"
+    DENSE_STEREO = "dense_stereo"
     BUILD_OCTREE = "build_octree"
 
 
@@ -62,9 +64,11 @@ class AssetType(enum.StrEnum):
 PIPELINE_ORDER: tuple[PipelineStep, ...] = (
     PipelineStep.DECODE_RAW,
     PipelineStep.FILTER_OUTLIERS,
+    PipelineStep.BIN_TO_RINEX,
     PipelineStep.PPK_CORRECTION,
     PipelineStep.GEOREFERENCE,
     PipelineStep.COLORIZE,
+    PipelineStep.DENSE_STEREO,
     PipelineStep.BUILD_OCTREE,
 )
 
@@ -72,10 +76,16 @@ PIPELINE_ORDER: tuple[PipelineStep, ...] = (
 class ScanInputKind(enum.StrEnum):
     """Auxiliary source files accompanying a scan's raw point stream."""
 
-    TRAJECTORY = "trajectory"  # PPK/SLAM trajectory from the scanner (.pos)
-    ROVER_OBS = "rover_obs"  # raw GNSS observations from the scanner (RINEX)
-    BASE_RINEX = "base_rinex"  # base station observations (RINEX) for PPK
-    NAV = "nav"  # broadcast ephemerides (RINEX nav)
+    TRAJECTORY = "trajectory"
+    ROVER_OBS = "rover_obs"
+    BASE_RINEX = "base_rinex"
+    NAV = "nav"
+    ROVER_PPKRAW_BIN = "rover_ppkraw_bin"
+    BASE_BIN = "base_bin"
+    FRAME_POSE = "frame_pose"
+    PROJECT_INFO = "project_info"
+    CALIBRATION = "calibration"
+    STEREO_IMAGES = "stereo_images"
 
 
 def _enum(e: type[enum.Enum], name: str) -> Enum:
@@ -145,6 +155,9 @@ class Scan(Base):
     # WGS84 footprint of the scan; GiST index (below) serves "scans in this area" queries.
     bbox = mapped_column(Geometry(geometry_type="POLYGON", srid=4326, spatial_index=False))
     rtk_fixed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    photogrammetry_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

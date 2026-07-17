@@ -7,6 +7,7 @@ import type {
   ScanInput,
   UploadInit,
 } from "./types";
+export type { Scan };
 
 export const API_URL: string =
   (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
@@ -51,6 +52,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       /* non-JSON error body */
     }
     throw new ApiError(res.status, detail);
+  }
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
   }
   return (await res.json()) as T;
 }
@@ -164,3 +168,12 @@ export const deleteProject = (projectId: string): Promise<void> =>
 
 export const deleteScan = (scanId: string): Promise<void> =>
   request(`/scans/${scanId}`, { method: "DELETE" });
+
+export const updateScanSettings = (
+  scanId: string,
+  settings: { photogrammetry_enabled: boolean },
+): Promise<Scan> =>
+  request(`/scans/${scanId}/settings`, {
+    method: "PATCH",
+    body: JSON.stringify(settings),
+  });
