@@ -92,6 +92,35 @@ async def rename_project(
     return project
 
 
+class ProjectSetTargetCrs(BaseModel):
+    # Output CRS scans in this project should be georeferenced into. Either an
+    # EPSG code (e.g. a regional Gauss-Kruger zone) OR a full WKT string (for a
+    # custom/local projection with no EPSG code). Both null falls back to the
+    # pipeline default of auto-computing a WGS84 UTM zone from each scan's RTK
+    # coordinates. target_crs_wkt takes precedence when both are given.
+    target_crs_epsg: int | None = Field(default=None, ge=1024, le=999999)
+    target_crs_wkt: str | None = Field(default=None, max_length=20000)
+
+
+@router.put(
+    "/{project_id}/target-crs",
+    response_model=ProjectOut,
+    dependencies=[Depends(_default_limit)],
+)
+async def set_project_target_crs(
+    project_id: uuid.UUID,
+    body: ProjectSetTargetCrs,
+    user: CurrentUser,
+    session: SessionDep,
+) -> Project:
+    project = await get_owned_project(session, project_id, user)
+    project.target_crs_epsg = body.target_crs_epsg
+    project.target_crs_wkt = body.target_crs_wkt
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
 @router.delete(
     "/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,

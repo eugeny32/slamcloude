@@ -11,6 +11,9 @@ dependencies = [
     "laspy[lazrs]>=2.5",
     "pyproj>=3.6",
     "Pillow>=10",
+    "opencv-python-headless>=4.9",
+    "rosbags>=0.9",
+    "kiss-icp>=1.3",
 ]
 
 [tool.uv.sources]

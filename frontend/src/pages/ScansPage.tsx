@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { deleteScan, listScans, reprocess, updateScanSettings, uploadInput, uploadScan } from "../api";
+import {
+  deleteScan,
+  listProjects,
+  listScans,
+  reprocess,
+  setProjectTargetCrs,
+  updateScanSettings,
+  uploadInput,
+  uploadScan,
+} from "../api";
 import type { InputKind, Scan } from "../types";
 
 function formatBytes(n: number | null): string {
@@ -83,6 +92,40 @@ export default function ScansPage() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [ppkFor, setPpkFor] = useState<string | null>(null);
+  // Project target CRS for georeferencing.
+  const [crsKind, setCrsKind] = useState<"auto" | "epsg" | "wkt">("auto");
+  const [crsEpsg, setCrsEpsg] = useState("");
+  const [crsWkt, setCrsWkt] = useState("");
+  const [crsSaved, setCrsSaved] = useState(false);
+
+  useEffect(() => {
+    if (!projectId) return;
+    void listProjects().then((projects) => {
+      const p = projects.find((x) => x.id === projectId);
+      if (!p) return;
+      if (p.target_crs_wkt) {
+        setCrsKind("wkt");
+        setCrsWkt(p.target_crs_wkt);
+      } else if (p.target_crs_epsg) {
+        setCrsKind("epsg");
+        setCrsEpsg(String(p.target_crs_epsg));
+      }
+    });
+  }, [projectId]);
+
+  async function onSaveCrs() {
+    if (!projectId) return;
+    setCrsSaved(false);
+    try {
+      await setProjectTargetCrs(projectId, {
+        target_crs_epsg: crsKind === "epsg" && crsEpsg ? Number(crsEpsg) : null,
+        target_crs_wkt: crsKind === "wkt" && crsWkt.trim() ? crsWkt.trim() : null,
+      });
+      setCrsSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -177,6 +220,64 @@ export default function ScansPage() {
             <span className="muted">{Math.round(progress * 100)}%</span>
           </>
         )}
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Проекция вывода</h3>
+        <div style={{ display: "flex", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+          <label>
+            <input
+              type="radio"
+              checked={crsKind === "auto"}
+              onChange={() => setCrsKind("auto")}
+            />{" "}
+            Авто (WGS84 UTM по RTK)
+          </label>
+          <label>
+            <input
+              type="radio"
+              checked={crsKind === "epsg"}
+              onChange={() => setCrsKind("epsg")}
+            />{" "}
+            EPSG
+          </label>
+          <label>
+            <input
+              type="radio"
+              checked={crsKind === "wkt"}
+              onChange={() => setCrsKind("wkt")}
+            />{" "}
+            WKT
+          </label>
+        </div>
+        {crsKind === "epsg" && (
+          <input
+            type="number"
+            placeholder="например 21015"
+            value={crsEpsg}
+            onChange={(e) => {
+              setCrsEpsg(e.target.value);
+              setCrsSaved(false);
+            }}
+            style={{ width: 180 }}
+          />
+        )}
+        {crsKind === "wkt" && (
+          <textarea
+            placeholder='PROJCS["...", ...] — полный WKT проекции'
+            value={crsWkt}
+            onChange={(e) => {
+              setCrsWkt(e.target.value);
+              setCrsSaved(false);
+            }}
+            rows={5}
+            style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
+          />
+        )}
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => void onSaveCrs()}>Сохранить проекцию</button>
+          {crsSaved && <span className="muted" style={{ marginLeft: 8 }}>Сохранено ✓</span>}
+        </div>
       </div>
 
       <div className="card">

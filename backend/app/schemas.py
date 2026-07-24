@@ -15,6 +15,8 @@ class ProjectOut(BaseModel):
 
     id: uuid.UUID
     name: str
+    target_crs_epsg: int | None = None
+    target_crs_wkt: str | None = None
     created_at: datetime
 
 

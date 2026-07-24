@@ -141,6 +141,13 @@ def wgs84_bbox(src: str | Path) -> tuple[float, float, float, float] | None:
     return (min(lons), min(lats), max(lons), max(lats))
 
 
+def crs_epsg(src: str | Path) -> int | None:
+    """EPSG code embedded in the LAZ header, or None if unset/unrecognised."""
+    with laspy.open(src) as reader:
+        crs = reader.header.parse_crs()
+    return crs.to_epsg() if crs is not None else None
+
+
 def bbox_polygon_ewkt(bbox: tuple[float, float, float, float]) -> str:
     """EWKT polygon for scans.bbox (geometry(POLYGON, 4326))."""
     min_lon, min_lat, max_lon, max_lat = bbox

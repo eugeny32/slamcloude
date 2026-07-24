@@ -1,0 +1,44 @@
+common:
+    lid_topic:  "/livox/lidar"
+    imu_topic:  "/livox/imu"      # S20's built-in MID-360 IMU, not an external one
+
+preprocess:
+    lidar_type: 1                 # Livox series LiDAR
+    feature_extract_en: false
+    scan_line: 4                  # MID-360 (matches worker-fastlio/mid360_template.yaml)
+    blind: 0.5                    # matches worker-fastlio: self-body proximity on this backpack
+
+initialization:
+    cut_frame_num: 5              # must be positive integer, 1 means do not cut frame
+    orig_odom_freq: 10            # this device's LiDAR frequency
+    mean_acc_norm: 1               # 1 for Livox built-in IMU (this device), not an external IMU's 9.805
+    online_refine_time: 20.0      # seconds
+    data_accum_length: 500
+    Rot_LI_cov: [ 0.00005, 0.00005, 0.00005 ]
+    Trans_LI_cov: [ 0.00001, 0.00001, 0.00001 ]
+
+mapping:
+    # NOTE: filter_size_map=0.15 + det_range=100 (this file's original
+    # values) trigger repeated PCL "Leaf size is too small ... Integer
+    # indices would overflow" warnings on a real run, and a widened/
+    # restricted version (0.3 / 40.0) avoids that warning but has not
+    # produced a converged result in several attempts -- reverted to the
+    # ORIGINAL (warning-producing but empirically completing) values while
+    # chasing an actual result; revisit if convergence is still elusive.
+    filter_size_surf: 0.05
+    filter_size_map: 0.15
+    gyr_cov: 50
+    acc_cov: 2
+    b_acc_cov: 0.0001
+    b_gyr_cov: 0.0001
+    det_range: 100.0
+
+publish:
+    path_en:  true
+    scan_publish_en:  true
+    dense_publish_en: true
+    scan_bodyframe_pub_en: true
+
+pcd_save:
+    pcd_save_en: false
+    interval: -1

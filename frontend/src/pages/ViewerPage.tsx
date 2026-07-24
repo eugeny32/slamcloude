@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { downloadScan, scanPreview, scanStatus } from "../api";
 import type { Preview, ScanDetails } from "../types";
-import { CopcViewer, ViewerStats } from "../viewer/copcViewer";
+import { ColorMode, CopcViewer, ViewerStats } from "../viewer/copcViewer";
 
 export default function ViewerPage() {
   const { scanId } = useParams<{ scanId: string }>();
@@ -13,6 +13,8 @@ export default function ViewerPage() {
   const [stats, setStats] = useState<ViewerStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [colorMode, setColorMode] = useState<ColorMode>("rgb");
+  const viewerRef = useRef<CopcViewer | null>(null);
 
   // Poll status while the pipeline is running.
   useEffect(() => {
@@ -47,6 +49,7 @@ export default function ViewerPage() {
         setPreview(p);
         if (!p.copc_url || !containerRef.current) return;
         viewer = new CopcViewer(containerRef.current, p.copc_url, setStats);
+        viewerRef.current = viewer;
         await viewer.load();
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -55,8 +58,14 @@ export default function ViewerPage() {
     return () => {
       cancelled = true;
       viewer?.dispose();
+      viewerRef.current = null;
     };
   }, [scanId, details?.status]);
+
+  function chooseColorMode(mode: ColorMode) {
+    setColorMode(mode);
+    viewerRef.current?.setColorMode(mode);
+  }
 
   async function onDownload() {
     if (!scanId) return;
@@ -107,6 +116,23 @@ export default function ViewerPage() {
             Загружено узлов октодерева: {stats.loadedNodes}/{stats.totalNodes} (
             {stats.loadedPoints.toLocaleString()} точек){stats.done ? "" : "…"}
           </p>
+        )}
+        {stats && (
+          <label className="muted" style={{ marginTop: 6, display: "block" }}>
+            Отображение:{" "}
+            <select
+              value={colorMode}
+              onChange={(e) => chooseColorMode(e.target.value as ColorMode)}
+            >
+              <option value="height">Высота</option>
+              <option value="intensity" disabled={!stats.hasIntensity}>
+                Интенсивность
+              </option>
+              <option value="rgb" disabled={!stats.hasRgb}>
+                RGB
+              </option>
+            </select>
+          </label>
         )}
         {details?.status === "completed" && preview && !preview.copc_url && (
           <p className="muted">COPC-ассет отсутствует — просмотр недоступен, но LAZ можно скачать.</p>

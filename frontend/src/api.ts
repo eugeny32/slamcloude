@@ -166,6 +166,18 @@ export const renameProject = (projectId: string, name: string): Promise<Project>
 export const deleteProject = (projectId: string): Promise<void> =>
   request(`/projects/${projectId}`, { method: "DELETE" });
 
+// Set the project's target output CRS for georeferencing: an EPSG code, or a
+// full WKT string for a custom/local projection, or both null for the default
+// (auto WGS84 UTM). WKT takes precedence server-side when both are set.
+export const setProjectTargetCrs = (
+  projectId: string,
+  crs: { target_crs_epsg?: number | null; target_crs_wkt?: string | null },
+): Promise<Project> =>
+  request(`/projects/${projectId}/target-crs`, {
+    method: "PUT",
+    body: JSON.stringify(crs),
+  });
+
 export const deleteScan = (scanId: string): Promise<void> =>
   request(`/scans/${scanId}`, { method: "DELETE" });
 

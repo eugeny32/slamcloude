@@ -36,6 +36,11 @@ class ScanStatus(enum.StrEnum):
 
 
 class PipelineStep(enum.StrEnum):
+    # COMPUTE_SLAM runs the Voxel-SLAM LiDAR-inertial kernel over a bag to
+    # produce the trajectory (frame_pose) + a locally-consistent world-frame
+    # cloud, replacing reliance on the vendor's on-device SLAM. It runs first
+    # and is a no-op for non-bag scans (like PPK_CORRECTION is best-effort).
+    COMPUTE_SLAM = "compute_slam"
     DECODE_RAW = "decode_raw"
     FILTER_OUTLIERS = "filter_outliers"
     BIN_TO_RINEX = "bin_to_rinex"
@@ -61,6 +66,7 @@ class AssetType(enum.StrEnum):
 
 # Canonical execution order; one Job row per step per scan.
 PIPELINE_ORDER: tuple[PipelineStep, ...] = (
+    PipelineStep.COMPUTE_SLAM,
     PipelineStep.DECODE_RAW,
     PipelineStep.FILTER_OUTLIERS,
     PipelineStep.BIN_TO_RINEX,
@@ -118,6 +124,15 @@ class Project(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Target output CRS for georeferencing scans in this project -- overrides
+    # the pipeline's default of auto-computing a WGS84 UTM zone from the RTK
+    # coordinates, for projects that need an existing local survey/GIS
+    # convention. Either an EPSG code (e.g. a regional Gauss-Kruger zone) OR a
+    # full WKT string (for custom/local projections without an EPSG code, e.g.
+    # the S20 vendor's "FusionCRS_TM_87"). target_crs_wkt takes precedence when
+    # both are set.
+    target_crs_epsg: Mapped[int | None] = mapped_column(Integer)
+    target_crs_wkt: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

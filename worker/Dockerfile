@@ -13,7 +13,7 @@ RUN apt-get update \
 # (PDAL's official distribution channel) via micromamba.
 RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest \
         | tar -xj -C /tmp bin/micromamba \
-    && /tmp/bin/micromamba install -y -r /opt/mamba -p /opt/pdal -c conda-forge pdal \
+    && /tmp/bin/micromamba create -y -r /opt/mamba -p /opt/pdal -c conda-forge pdal \
     && ln -s /opt/pdal/bin/pdal /usr/local/bin/pdal \
     && pdal --version \
     && rm -rf /tmp/bin /opt/mamba/pkgs
@@ -22,6 +22,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /srv
 COPY backend/ ./backend/
+COPY pyproject.toml ./pyproject.toml
 COPY worker/ ./worker/
 RUN uv pip install --system --no-cache ./backend ./worker
 

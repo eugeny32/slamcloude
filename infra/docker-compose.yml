@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-slam}
       POSTGRES_DB: slamcloude
     ports:
-      - "127.0.0.1:5432:5432"   # not exposed publicly
+      - "127.0.0.1:5433:5432"   # not exposed publicly; 5432 conflicts with the Windows-native PostgreSQL 15 service on this host
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -116,6 +116,61 @@ services:
         condition: service_healthy
     # Horizontal scaling: docker compose up --scale worker=4
     # GPU (later): add `deploy.resources.reservations.devices` / k8s GPU pod.
+
+  worker-fastlio:
+    build:
+      context: ..
+      dockerfile: worker-fastlio/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+    mem_limit: 8g
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    # Standalone validation first (docker run against a local bag+calibration),
+    # see worker-fastlio/fastlio_bridge.py -- not yet wired into the main
+    # pipeline's task graph (backend/tasks.py COMPUTE_TRAJECTORY step).
+
+  worker-voxelslam:
+    build:
+      context: ..
+      dockerfile: worker-voxelslam/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_RAW_BUCKET: raw
+    mem_limit: 8g
+    # Override the standalone offline-run ENTRYPOINT to run the Celery worker
+    # (celery_worker.py) that services the COMPUTE_SLAM pipeline step off the
+    # "voxelslam" queue.
+    entrypoint: ["/bin/bash", "-lc"]
+    command:
+      - "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && cd /root/catkin_ws && celery -A celery_worker.app worker -Q voxelslam --loglevel=info --concurrency=1"
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  worker-gtsam:
+    build:
+      context: ..
+      dockerfile: worker-gtsam/Dockerfile
+    # Standalone CLI tool, not a Celery worker (no REDIS_URL/S3 env needed yet):
+    #   docker run --rm -v <data-dir>:/data slamcloude-worker-gtsam \
+    #     /data/cloud.las /data/frame_pose.txt /data/rtk.pos /data/out.laz
+    # Isolated because gtsam==4.2.1 needs numpy<2, conflicting with the main
+    # worker's numpy>=2/scipy/opencv stack -- see gtsam_georeference.py's
+    # docstring for what it does differently from pipeline.s20's
+    # georeference_from_slam and its validated (~13% roughness improvement,
+    # one scan only) and open (no orientation/loop-closure correction) caveats.
 
   frontend:
     build:

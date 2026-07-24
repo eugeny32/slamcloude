@@ -280,19 +280,22 @@ async def upload_scan_input(
     suffix = FsPath(filename).suffix.lower()[:16] if filename else ""
     key = f"{scan.id}/inputs/{kind.value}{suffix}"
 
-    # Stream to a temp file (bounded memory), then stream to S3.
+    # Stream to a temp file (bounded memory), then stream to S3. The temp file
+    # is unlinked in the finally regardless of where we bail out (oversize,
+    # empty, or upload error) so an aborted/abusive upload never leaks disk.
     size = 0
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp_path = FsPath(tmp.name)
-        async for chunk in request.stream():
-            size += len(chunk)
-            if size > settings.max_upload_size_bytes:
-                raise HTTPException(
-                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    f"input file exceeds limit of {settings.max_upload_size_bytes} bytes",
-                )
-            tmp.write(chunk)
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp_path = FsPath(tmp.name)
     try:
+        with tmp:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > settings.max_upload_size_bytes:
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        f"input file exceeds limit of {settings.max_upload_size_bytes} bytes",
+                    )
+                tmp.write(chunk)
         if size == 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty input file body")
         await run_in_threadpool(

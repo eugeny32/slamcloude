@@ -30,6 +30,9 @@ frontend/dist/
 .idea/
 .vscode/
 
+# Claude Code (personal settings)
+.claude/settings.local.json
+
 # OS
 Thumbs.db
 .DS_Store

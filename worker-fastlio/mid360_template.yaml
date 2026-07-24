@@ -1,0 +1,84 @@
+/**:
+    ros__parameters:
+        feature_extract_enable: false
+        point_filter_num: 1
+        # Validated on scan 2026-07-04_04-12-33_PointCloud: raising this from
+        # FAST-LIO2's stock default of 3 gave a further gain at essentially
+        # zero extra wall-clock cost (per-scan ESKF converges fast regardless
+        # of the cap): 3->4.172m, 5->4.122m, 10->4.105m, 20->4.0835m raw
+        # local-frame roughness. 20 and 50 produced BIT-IDENTICAL output
+        # (same n_cells, same roughness to 4 decimals) -- this is the
+        # algorithm's true convergence point, not just diminishing returns;
+        # going above 20 is pure waste.
+        max_iteration: 20
+        # Validated on scan 2026-07-04_04-12-33_PointCloud: going finer (0.1)
+        # to try to squeeze out more local precision REGRESSED raw local-frame
+        # roughness (4.17m -> 4.31m) -- the map voxel is apparently already
+        # below the point where finer resolution helps vs. just fitting more
+        # sensor noise. 0.2 confirmed better than both the old untuned
+        # defaults (see mapping.acc_cov comment) and 0.1.
+        filter_size_surf: 0.2
+        filter_size_map: 0.2
+        cube_side_length: 1000.0
+        runtime_pos_log_enable: false
+        map_file_path: "./test.pcd"
+
+        common:
+            lid_topic:  "/livox/lidar"
+            imu_topic:  "/livox/imu"
+            time_sync_en: false
+            # Filled in per-scan from calibration.yaml's IMU_time_offset by
+            # fastlio_bridge.py -- validated on 2026-07-04_04-12-33_PointCloud:
+            # applying this device's real -0.01s offset (previously ignored)
+            # improved raw local-frame roughness 4.52m -> 4.17m. Placeholder
+            # 0.0 below is used only if generation fails.
+            time_offset_lidar_to_imu: 0.0
+
+        preprocess:
+            lidar_type: 1              # AVIA/CustomMsg family (also used by MID-360)
+            scan_line: 4
+            blind: 0.5
+            time_scale: 1e-9           # our published offset_time is in nanoseconds (see fastlio_bridge.py)
+
+        mapping:
+            # acc_cov/gyr_cov/b_acc_cov/b_gyr_cov are FAST-LIO2's IMU process-noise
+            # weighting terms, not literal sensor datasheet variance -- these values
+            # are informed by measured stationary-period noise on this exact S20
+            # unit's MID-360 IMU (see session notes: acc std ~0.005-0.007g ->
+            # ~0.05-0.07 m/s^2, gyro std ~0.0013-0.0025 rad/s), scaled down from
+            # FAST-LIO2's stock 0.1/0.1/0.0001/0.0001 defaults (tuned for
+            # noisier/unknown IMUs) -- start here and retune empirically.
+            # Tested tighter (acc_cov=0.01, gyr_cov=0.005) on
+            # 2026-07-04_04-12-33_PointCloud: 4.084m -> 4.388m, worse --
+            # over-trusting the IMU past its real noise level hurts. These
+            # values (informed by measured stationary noise) stay.
+            acc_cov: 0.05
+            gyr_cov: 0.01
+            b_acc_cov: 0.0001
+            b_gyr_cov: 0.0001
+            fov_degree:    360.0
+            det_range:     100.0
+            # Tested extrinsic_est_en=true (online refinement starting from
+            # our already-validated calibration.yaml extrinsic) on
+            # 2026-07-04_04-12-33_PointCloud: 4.084m -> 4.111m, slightly
+            # worse -- matches published guidance that this should stay
+            # false once the extrinsic is already known/trusted.
+            extrinsic_est_en:  false
+            # Filled in per-scan from this recording's info/calibration.yaml
+            # (LIDAR_IMU_T / LIDAR_IMU_R) by fastlio_bridge.py -- placeholders below
+            # match observed calibration.yaml values for this device (identity
+            # rotation, ~1.1/2.3/4.4cm translation), used only if generation fails.
+            extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
+            extrinsic_R: [ 1., 0., 0.,
+                        0., 1., 0.,
+                        0., 0., 1.]
+
+        publish:
+            path_en:  true
+            scan_publish_en:  true
+            dense_publish_en: true
+            scan_bodyframe_pub_en: false
+
+        pcd_save:
+            pcd_save_en: false
+            interval: -1

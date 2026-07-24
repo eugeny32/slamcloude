@@ -1,6 +1,8 @@
 export interface Project {
   id: string;
   name: string;
+  target_crs_epsg?: number | null;
+  target_crs_wkt?: string | null;
   created_at: string;
 }
 

@@ -1,0 +1,66 @@
+General:
+  lid_topic: "/livox/lidar"
+  imu_topic: "/livox/imu"
+  save_path: "/data/voxelslam_out/"   # bind-mounted host dir; PCD written here
+  previous_map: ""
+  bagname: "s20"                        # output PCD basename under save_path
+  lidar_type: 0                         # 0 = Livox CustomMsg (our bag format)
+  blind: 0.5
+  # Kept at the vendor default 3: tested full density (1) -> 12.2M points and
+  # 2.83m roughness, WORSE than 3's 5.26M points / 2.31m. Extra points add
+  # per-cell scatter without improving the BA-estimated poses, so denser is
+  # counterproductive for this metric.
+  point_filter_num: 3
+  # Matches the S20 calibration.yaml LIDAR_IMU_T/R exactly (and the vendor's
+  # own mid360.yaml) -- the extrinsic our LI-Init detour wrongly overrode.
+  extrinsic_tran: [-0.011, -0.02329, 0.04412]
+  extrinsic_rota: [1, 0, 0,
+                   0, 1, 0,
+                   0, 0, 1]
+  is_save_map: 1                        # write the globally-optimized map to disk
+
+Odometry:
+  max_init: 30
+  cov_gyr: 0.1
+  cov_acc: 1
+  rdw_gyr: 0.0001
+  rdw_acc: 0.0001
+  down_size: 0.1
+  dept_err: 0.02
+  beam_err: 0.05
+  voxel_size: 1
+  min_eigen_value: 0.0025
+  degrade_bound: 10
+  # point_notime=0 (true per-point offset_time deskew). Now safe because the
+  # node reads the bag directly/synchronously (offline_bag.patch.py) -- no
+  # publish-rate lag, no subscriber-queue tail, no "LiDAR time regress" from
+  # replay jitter. This is the accurate-deskew path the Python-bridge era
+  # couldn't sustain; header-interval timing (point_notime=1) gave 2.31m.
+  point_notime: 0
+
+LocalBA:
+  win_size: 10
+  max_layer: 2
+  cov_gyr: 0.01
+  cov_acc: 2
+  rdw_gyr: 0.0001
+  rdw_acc: 0.0001
+  min_ba_point: 1
+  plane_eigen_value_thre: [4.0, 4.0, 4.0, 4.0]
+  imu_coef: 0.0002
+  thread_num: 5
+
+Loop:
+  jud_default: 0.45
+  icp_eigval: 9
+  ratio_drift: 0.01
+
+GBA:
+  # Pushing toward the vendor's 0.88m: a finer global-BA voxel (2 -> 1) fits
+  # the map on smaller planar patches and more iterations (6 -> 10) let the
+  # hierarchical global bundle adjustment converge further. Tuning from the
+  # 1.10m offline-true-deskew baseline.
+  voxel_size: 1
+  min_eigen_value: 0.01
+  eigen_value_array: [4.0, 4.0, 4.0, 4.0]
+  total_max_iter: 10
